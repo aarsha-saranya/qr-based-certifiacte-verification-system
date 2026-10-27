@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Issue Certificates</title>
+  <style>
+    :root {
+      --navy: #1f3a5f; --gold: #b8923b; --bg: #f5f6f8; --card: #ffffff;
+      --text: #1d2733; --muted: #5b6470; --line: #e2e5ea;
+      --ok: #1d7a46; --err: #b3261e;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+           background: var(--bg); color: var(--text); line-height: 1.45; }
+    header { background: var(--navy); color: #fff; padding: 20px 24px; border-bottom: 4px solid var(--gold); }
+    header h1 { margin: 0; font-size: 1.3rem; }
+    header p { margin: 4px 0 0; opacity: .8; font-size: .9rem; }
+    main { max-width: 1040px; margin: 24px auto; padding: 0 16px; display: grid; gap: 24px;
+           grid-template-columns: minmax(0, 1fr); align-items: start; }
+    @media (min-width: 860px) { main { grid-template-columns: 340px minmax(0, 1fr); } }
+    .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 20px; }
+    h2 { margin: 0 0 14px; font-size: 1.05rem; color: var(--navy); }
+    label { display: block; font-size: .82rem; font-weight: 600; margin: 12px 0 4px; color: var(--muted); }
+    input { width: 100%; padding: 9px 11px; border: 1px solid var(--line); border-radius: 8px;
+            font: inherit; background: #fff; color: var(--text); }
+    input:focus { outline: 2px solid var(--gold); outline-offset: 1px; border-color: var(--gold); }
+    .btn { display: inline-block; padding: 9px 16px; border: 0; border-radius: 8px; background: var(--navy);
+           color: #fff; font: inherit; font-weight: 600; text-decoration: none; cursor: pointer; }
+    .btn:hover { background: #162b47; }
+    .btn:disabled { opacity: .6; cursor: wait; }
+    .btn.secondary { background: #fff; color: var(--navy); border: 1px solid var(--navy); }
+    .btn.secondary:hover { background: #eef2f7; }
+    .btn.small { padding: 5px 10px; font-size: .82rem; }
+    form .btn { width: 100%; margin-top: 18px; }
+    .msg { margin-top: 12px; font-size: .9rem; color: var(--err); min-height: 1.2em; }
+    #result { margin-top: 18px; padding-top: 16px; border-top: 1px dashed var(--line); text-align: center; }
+    #result h3 { margin: 0 0 6px; color: var(--ok); font-size: 1rem; }
+    #result img { margin: 10px 0; border: 1px solid var(--line); border-radius: 8px; padding: 6px; background: #fff; }
+    .actions { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+    .mono { font-family: ui-monospace, Consolas, monospace; font-size: .85rem; word-break: break-all; }
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+    th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+    th { font-size: .75rem; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+    td.row-actions { white-space: nowrap; display: flex; gap: 6px; }
+    #empty { color: var(--muted); text-align: center; padding: 24px 0 8px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Certificate Issuing</h1>
+    <p>Issue a certificate, then download it as a PDF with a verification QR code.</p>
+  </header>
+
+  <main>
+    <section class="card">
+      <h2>New certificate</h2>
+      <form id="issue-form" autocomplete="off">
+        <label for="name">Student name</label>
+        <input id="name" name="name" required maxlength="120">
+
+        <label for="email">Student email</label>
+        <input id="email" name="email" type="email" required maxlength="160">
+
+        <label for="course_name">Course / workshop</label>
+        <input id="course_name" name="course_name" required maxlength="160">
+
+        <label for="issued_by">Issued by</label>
+        <input id="issued_by" name="issued_by" required maxlength="160">
+
+        <label for="issue_date">Issue date</label>
+        <input id="issue_date" name="issue_date" type="date" required>
+
+        <button class="btn" type="submit">Issue certificate</button>
+        <div class="msg" id="msg" role="alert"></div>
+      </form>
+      <div id="result" hidden></div>
+    </section>
+
+    <section class="card">
+      <h2>Issued certificates</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>ID</th><th>Name</th><th>Course</th><th>Date</th><th></th></tr>
+          </thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+      <p id="empty" hidden>No certificates yet. Issue the first one.</p>
+    </section>
+  </main>
+
+  <script>
+    const $ = (selector) => document.querySelector(selector);
+    const form = $("#issue-form");
+    const msg = $("#msg");
+    const result = $("#result");
+    const rows = $("#rows");
+    const empty = $("#empty");
+
+    // Build elements with textContent only, so names typed by users can never inject HTML.
+    function el(tag, props = {}, ...children) {
+      const node = Object.assign(document.createElement(tag), props);
+      children.forEach((child) => node.append(child));
+      return node;
+    }
+
+    function setDefaultDate() {
+      const local = new Date(Date.now() - new Date().getTimezoneOffset() * 60000);
+      $("#issue_date").value = local.toISOString().slice(0, 10);
+    }
+
+    function setMessage(text) {
+      msg.textContent = text || "";
+    }
+
+    function showResult(id) {
+      const enc = encodeURIComponent(id);
+      result.replaceChildren(
+        el("h3", { textContent: "Certificate issued" }),
+        el("div", { className: "mono", textContent: id }),
+        el("img", { src: `/certificates/${enc}/qr.svg`, alt: `QR code for ${id}`, width: 140, height: 140 }),
+        el("div", { className: "actions" },
+          el("a", { className: "btn", href: `/certificates/${enc}/pdf`, textContent: "Download PDF" }),
+          el("a", { className: "btn secondary", href: `/certificates/${enc}/preview`,
+                    target: "_blank", rel: "noopener", textContent: "Preview" })
+        )
+      );
+      result.hidden = false;
+    }
+
+    async function loadList() {
+      try {
+        const res = await fetch("/certificates");
+        const list = await res.json();
+        rows.replaceChildren(...list.map((c) => {
+          const enc = encodeURIComponent(c.certificate_id);
+          return el("tr", {},
+            el("td", { className: "mono", textContent: c.certificate_id }),
+            el("td", { textContent: c.name }),
+            el("td", { textContent: c.course_name }),
+            el("td", { textContent: c.issue_date }),
+            el("td", { className: "row-actions" },
+              el("a", { className: "btn small", href: `/certificates/${enc}/pdf`, textContent: "PDF" }),
+              el("a", { className: "btn small secondary", href: `/certificates/${enc}/preview`,
+                        target: "_blank", rel: "noopener", textContent: "View" })
+            )
+          );
+        }));
+        empty.hidden = list.length > 0;
+      } catch (err) {
+        setMessage("Could not load the certificate list.");
+      }
+    }
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      setMessage("");
+      const button = form.querySelector("button[type=submit]");
+      button.disabled = true;
+      button.textContent = "Issuing...";
+      try {
+        const res = await fetch("/certificates", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(Object.fromEntries(new FormData(form))),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Could not issue the certificate.");
+        showResult(data.certificate_id);
+        form.reset();
+        setDefaultDate();
+        await loadList();
+      } catch (err) {
+        setMessage(err.message);
+      } finally {
+        button.disabled = false;
+        button.textContent = "Issue certificate";
+      }
+    });
+
+    setDefaultDate();
+    loadList();
+  </script>
+</body>
+</html>
