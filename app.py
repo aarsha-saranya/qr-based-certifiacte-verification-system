@@ -2,9 +2,11 @@ from flask import Flask, jsonify, request
 from flask_cors import CORS
 from database import init_db
 from models import add_certificate, get_certificate, get_all_certificates
+from certificate_routes import certificate_bp
 
 app = Flask(__name__)
 CORS(app)  # allow other origins (e.g. a frontend) to call this API
+app.register_blueprint(certificate_bp)
 init_db()
 
 REQUIRED_FIELDS = ["name", "email", "course_name", "issued_by", "issue_date"]
