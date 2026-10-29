@@ -42,9 +42,13 @@ def _pdf_response(certificate_id, as_attachment):
 
 @certificate_bp.get("/issue")
 def issue_page():
+<<<<<<< HEAD
     # Keep the issuing dashboard behind the same login gate as the homepage.
     from flask import redirect
     return redirect("/")
+=======
+    return render_template("issue.html")
+>>>>>>> 21ecc1c83ddf9d9674b32ef06d00a701d297e60c
 
 
 @certificate_bp.get("/certificates/<certificate_id>/pdf")

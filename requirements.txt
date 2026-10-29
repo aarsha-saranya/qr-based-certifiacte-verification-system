@@ -1,5 +1,9 @@
 flask>=3.1
 flask-cors
 requests
+<<<<<<< HEAD
 reportlab
 gunicorn
+=======
+reportlab
+>>>>>>> 21ecc1c83ddf9d9674b32ef06d00a701d297e60c
