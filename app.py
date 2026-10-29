@@ -1,5 +1,4 @@
 
-
 import os
 import sqlite3
 from functools import wraps
@@ -24,16 +23,21 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 from database import get_db_connection, init_db
 from models import add_certificate, get_certificate, get_all_certificates
+from certificate_routes import certificate_bp
 
 app = Flask(__name__)
-init_db()
 app.secret_key = os.environ.get(
     "SECRET_KEY",
     "replace-this-with-a-long-random-secret"
 )
 
+# Initialize the database and register the PDF routes.
+init_db()
+app.register_blueprint(certificate_bp)
+
+
 # --------------------------------------------------
-# Authentication helper
+# Authentication helpers
 # --------------------------------------------------
 
 def login_required(route_function):
@@ -43,6 +47,7 @@ def login_required(route_function):
             flash("Please log in first.", "warning")
             return redirect(url_for("login"))
         return route_function(*args, **kwargs)
+
     return wrapper
 
 
@@ -51,6 +56,7 @@ def get_current_user_id():
     if user_id is None:
         abort(401)
     return int(user_id)
+
 
 @app.context_processor
 def inject_user():
@@ -62,6 +68,8 @@ def inject_user():
             }
         }
     return {"user": None}
+
+
 # --------------------------------------------------
 # Home / dashboard
 # --------------------------------------------------
@@ -70,8 +78,6 @@ def inject_user():
 @login_required
 def index():
     user_id = get_current_user_id()
-
-    # This function must filter certificates by owner_user_id.
     certificates = get_all_certificates(owner_user_id=user_id)
 
     return render_template(
@@ -117,8 +123,12 @@ def signup():
             return redirect(url_for("login"))
 
         except sqlite3.IntegrityError:
-            flash("That username or email may already be registered.", "danger")
+            flash(
+                "That username or email may already be registered.",
+                "danger"
+            )
             return redirect(url_for("signup"))
+
         finally:
             conn.close()
 
@@ -139,7 +149,8 @@ def login():
         try:
             user = conn.execute(
                 """
-                SELECT * FROM users
+                SELECT *
+                FROM users
                 WHERE lower(email) = ? OR lower(username) = ?
                 LIMIT 1
                 """,
@@ -171,7 +182,7 @@ def logout():
 
 
 # --------------------------------------------------
-# Issue a certificate
+# Issue a certificate using the web form
 # --------------------------------------------------
 
 @app.route("/issue", methods=["GET", "POST"])
@@ -180,7 +191,6 @@ def issue_certificate():
     if request.method == "POST":
         user_id = get_current_user_id()
 
-        # Adjust these field names to match your issue.html form.
         student_name = request.form.get("student_name", "").strip()
         course_name = request.form.get("course_name", "").strip()
         certificate_id = request.form.get("certificate_id", "").strip()
@@ -191,9 +201,12 @@ def issue_certificate():
 
         conn = get_db_connection()
         try:
-            # Verify that the ID is not already in use.
             existing = conn.execute(
-                "SELECT 1 FROM certificates WHERE certificate_id = ?",
+                """
+                SELECT 1
+                FROM certificates
+                WHERE certificate_id = ?
+                """,
                 (certificate_id,),
             ).fetchone()
 
@@ -201,7 +214,6 @@ def issue_certificate():
                 flash("That certificate ID already exists.", "danger")
                 return redirect(url_for("issue_certificate"))
 
-            # owner_user_id is what separates institutions.
             conn.execute(
                 """
                 INSERT INTO certificates
@@ -220,9 +232,9 @@ def issue_certificate():
 
     return render_template("issue.html")
 
+
 # --------------------------------------------------
-# JSON API used by the Issue page
-# (login required; each user only sees their own certificates)
+# Certificate JSON API
 # --------------------------------------------------
 
 @app.route("/certificates", methods=["GET"])
@@ -236,13 +248,27 @@ def list_certificates():
 @login_required
 def create_certificate():
     data = request.get_json(silent=True)
+
     if not data:
         return jsonify({"error": "Request body must be valid JSON"}), 400
 
-    required = ["name", "email", "course_name", "issued_by", "issue_date"]
-    missing = [f for f in required if not str(data.get(f, "")).strip()]
+    required = [
+        "name",
+        "email",
+        "course_name",
+        "issued_by",
+        "issue_date",
+    ]
+
+    missing = [
+        field for field in required
+        if not str(data.get(field, "")).strip()
+    ]
+
     if missing:
-        return jsonify({"error": f"Missing fields: {', '.join(missing)}"}), 400
+        return jsonify({
+            "error": f"Missing fields: {', '.join(missing)}"
+        }), 400
 
     try:
         certificate_id = add_certificate(
@@ -253,17 +279,22 @@ def create_certificate():
             issue_date=str(data["issue_date"]).strip(),
             owner_user_id=get_current_user_id(),
         )
-    except ValueError as e:
-        return jsonify({"error": str(e)}), 400
+    except ValueError as error:
+        return jsonify({"error": str(error)}), 400
 
     return jsonify({"certificate_id": certificate_id}), 201
+
+
+# --------------------------------------------------
+# QR code in SVG format
+# --------------------------------------------------
+
 @app.route("/certificates/<certificate_id>/qr.svg")
 @login_required
 def certificate_qr_svg(certificate_id):
     user_id = get_current_user_id()
     certificate = get_certificate(certificate_id)
 
-    # Only the account that issued the certificate can load its QR image.
     if not certificate or certificate["owner_user_id"] != user_id:
         abort(404)
 
@@ -277,16 +308,24 @@ def certificate_qr_svg(certificate_id):
         verify_url,
         image_factory=qrcode.image.svg.SvgPathImage,
     )
+
     buffer = BytesIO()
     qr_image.save(buffer)
 
-    return Response(buffer.getvalue(), mimetype="image/svg+xml")
+    return Response(
+        buffer.getvalue(),
+        mimetype="image/svg+xml"
+    )
+
+
+# --------------------------------------------------
+# Public certificate JSON for verification
+# --------------------------------------------------
 
 @app.route("/certificates/<certificate_id>", methods=["GET"])
 def certificate_public_json(certificate_id):
-    # Public on purpose: anyone who scans the QR code can verify.
-    # Only return fields a verifier needs (no email, no owner id).
     certificate = get_certificate(certificate_id)
+
     if certificate is None:
         return jsonify({"error": "Certificate not found"}), 404
 
@@ -298,18 +337,25 @@ def certificate_public_json(certificate_id):
         "issue_date": certificate["issue_date"],
         "status": certificate["status"],
     })
+
+
 # --------------------------------------------------
 # Public certificate verification
-# Anyone with a valid certificate ID can verify it.
 # --------------------------------------------------
 
 @app.route("/verify", methods=["GET", "POST"])
 def verify_certificate():
     if request.method == "POST":
-        certificate_id = request.form.get("certificate_id", "").strip()
+        certificate_id = request.form.get(
+            "certificate_id", ""
+        ).strip()
+
         if certificate_id:
             return redirect(
-                url_for("verify_certificate_by_id", certificate_id=certificate_id)
+                url_for(
+                    "verify_certificate_by_id",
+                    certificate_id=certificate_id,
+                )
             )
 
     return render_template("verify.html", certificate_id="")
@@ -317,12 +363,14 @@ def verify_certificate():
 
 @app.route("/verify/<certificate_id>")
 def verify_certificate_by_id(certificate_id):
-    return render_template("verify.html", certificate_id=certificate_id)
+    return render_template(
+        "verify.html",
+        certificate_id=certificate_id
+    )
 
 
 # --------------------------------------------------
-# QR code generation
-# Public QR images only link to public verification.
+# QR code in PNG format
 # --------------------------------------------------
 
 @app.route("/qr/<certificate_id>")
@@ -360,87 +408,30 @@ def certificate_qr(certificate_id):
     return send_file(
         image_buffer,
         mimetype="image/png",
+        as_attachment=True,
         download_name=f"{certificate_id}_qr.png",
     )
 
 
 # --------------------------------------------------
-# Run the application
+# Error handlers
 # --------------------------------------------------
 
-if __name__ == "__main__":
-    app.run(debug=True)
-
-from flask import Flask, jsonify, request
-from flask_cors import CORS
-from database import init_db
-from models import add_certificate, get_certificate, get_all_certificates
-from certificate_routes import certificate_bp
-
-app = Flask(__name__)
-CORS(app)  # allow other origins (e.g. a frontend) to call this API
-app.register_blueprint(certificate_bp)
-init_db()
-
-REQUIRED_FIELDS = ["name", "email", "course_name", "issued_by", "issue_date"]
-
-
-@app.route("/")
-def home():
-    return jsonify({"message": "Certificate backend is running"})
-
-
-@app.route("/certificates", methods=["POST"])
-def create_certificate():
-    data = request.get_json(silent=True)
-    if not data:
-        return jsonify({"error": "Request body must be valid JSON"}), 400
-
-    missing = [f for f in REQUIRED_FIELDS if not str(data.get(f, "")).strip()]
-    if missing:
-        return jsonify({"error": f"Missing fields: {', '.join(missing)}"}), 400
-
-    try:
-        certificate_id = add_certificate(
-            name=str(data["name"]).strip(),
-            email=str(data["email"]).strip().lower(),
-            course_name=str(data["course_name"]).strip(),
-            issued_by=str(data["issued_by"]).strip(),
-            issue_date=str(data["issue_date"]).strip(),
-        )
-    except RuntimeError as e:
-        return jsonify({"error": str(e)}), 500
-
-    return jsonify({"certificate_id": certificate_id}), 201
-
-
-@app.route("/certificates", methods=["GET"])
-def list_certificates():
-    return jsonify(get_all_certificates())
-
-
-@app.route("/certificates/<certificate_id>", methods=["GET"])
-def fetch_certificate(certificate_id):
-    certificate = get_certificate(certificate_id)
-    if certificate is None:
-        return jsonify({"error": "Certificate not found"}), 404
-    return jsonify(certificate)
-
-
 @app.errorhandler(404)
-def not_found(e):
-    return jsonify({"error": "Resource not found"}), 404
+def not_found(error):
+    if request.path.startswith("/certificates/"):
+        return jsonify({"error": "Certificate or resource not found"}), 404
+    return "Page not found.", 404
 
 
 @app.errorhandler(405)
-def method_not_allowed(e):
+def method_not_allowed(error):
     return jsonify({"error": "Method not allowed for this URL"}), 405
 
 
-@app.errorhandler(500)
-def server_error(e):
-    return jsonify({"error": "Internal server error"}), 500
-
+# --------------------------------------------------
+# Run the application
+# --------------------------------------------------
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=False)
