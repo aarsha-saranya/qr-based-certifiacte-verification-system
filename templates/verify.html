@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#102a43">
+  <title>Verify Certificate | CertiTrust</title>
+  <link rel="stylesheet" href="/static/verify.css">
+</head>
+<body>
+<div class="topline"></div>
+<header class="topbar">
+  <a class="brand" href="/">CT</a>
+  <div class="brand-text"><h1>CertiTrust</h1><p>Digital Certificate Verification</p></div>
+  <a class="back" href="/">Institution dashboard</a>
+</header>
+<main class="wrap">
+  <section class="intro">
+    <span class="eyebrow">PUBLIC CERTIFICATE CHECK</span>
+    <h2>Trust what you can <span>verify.</span></h2>
+    <p>This page checks the certificate ID against the institution's records. You do not need an account to verify a certificate.</p>
+    <div class="trustline"><span>✓</span> Verification is checked against the certificate database</div>
+  </section>
+  <section class="panel">
+    <div class="icon">✓</div><span class="overline">CERTIFICATE STATUS</span>
+    <h2>Verification result</h2><p class="muted">Certificate ID</p>
+    <div class="cert-id" id="cert-id"></div>
+    <div id="result" class="result loading" aria-live="polite">Checking certificate record…</div>
+    <a class="back-link" href="/">← Institution dashboard</a>
+  </section>
+</main>
+<footer><strong>CertiTrust</strong> · Digital Certificate Verification System</footer>
+<script>window.CERTIFICATE_ID = {{ certificate_id|tojson }};</script>
+<script src="/static/verify.js"></script>
+</body></html>
