@@ -1,93 +1,72 @@
-<<<<<<< HEAD
-# CertiTrust — Certificate Issuing and Verification Website
+# CertiTrust: QR-Based Certificate Verification System
 
-A responsive Flask + SQLite website with account sign-up/login, certificate issuance, searchable records, PDF downloads and public QR-code verification.
+A Flask + SQLite website where institutions create an account, issue digital certificates, and give each certificate a unique ID and QR code. Anyone can verify a certificate through a public page, without needing an account.
 
-## Run locally on Windows
+## Project status
 
-1. Install Python 3.10+.
-2. Open PowerShell in the folder containing `app.py`.
-3. Install dependencies:
+**Completed**
+
+- Sign up, log in and log out for institutions (passwords are stored hashed)
+- Dashboard and Issue page for creating certificates (student name, email, course, issuing institution, issue date)
+- Unique certificate ID generation (format `CERT-XXXXXXXXXXXX`)
+- Records table with search, scoped to the logged-in account (each institution only sees its own certificates)
+- QR code for each certificate, shown after issuing (SVG), linking to its verification page
+- Public verification page at `/verify/<certificate_id>` showing the student, course, institution, issue date and status, or a "not found" result
+
+**Not finished yet**
+
+- PDF certificate download (the button is on the page but the route is not built yet)
+- Scanning the QR code from a phone (see "Known limitations")
+- Deployment to a public HTTPS host
+
+## Tech stack
+
+- Python 3.10+
+- Flask
+- SQLite
+- `qrcode` for QR generation
+- Plain HTML, CSS and JavaScript for the pages
+
+## Run locally (Windows)
+
+1. Open a terminal in the project folder (the one that contains `app.py`).
+2. Create and activate a virtual environment:
+   ```powershell
+   python -m venv venv
+   .\venv\Scripts\activate
+   ```
+3. Install the dependencies:
    ```powershell
    pip install -r requirements.txt
    ```
-4. Start the website:
+4. Start the server:
    ```powershell
    python app.py
    ```
-5. Open `http://127.0.0.1:5000/`. Create an account, then issue a certificate.
+5. Open `http://127.0.0.1:5000/`, create an account, log in, and issue a certificate.
 
-## How the workflow works
+The database file (`certificates.db`) is created automatically on first start.
 
-- Institution user signs up or logs in.
-- The dashboard issues a certificate and stores its record in SQLite.
-- The site generates a PDF containing a unique QR code.
-- Anyone can scan the QR code and visit `/verify/<certificate_id>`; no account is required to verify.
-- The verification page queries the stored record and displays its details or a not-found result.
-- Dashboard and certificate management API routes require login.
+## Pages and routes
 
-## Test on a mobile phone on the same Wi-Fi
+| Method | URL | Access | Purpose |
+|---|---|---|---|
+| GET | `/` | Login required | Dashboard |
+| GET, POST | `/signup` | Public | Create an account |
+| GET, POST | `/login` | Public | Log in |
+| GET, POST | `/logout` | Public | Log out |
+| GET | `/issue` | Login required | Issue page |
+| GET | `/certificates` | Login required | List your own certificates (JSON) |
+| POST | `/certificates` | Login required | Issue a certificate (JSON) |
+| GET | `/certificates/<id>/qr.svg` | Login required, owner only | QR code image |
+| GET | `/qr/<id>` | Login required, owner only | QR code image (PNG) |
+| GET | `/certificates/<id>` | Public | Certificate details for verification (JSON) |
+| GET, POST | `/verify` | Public | Enter a certificate ID |
+| GET | `/verify/<id>` | Public | Verification result page |
 
-1. Keep `python app.py` running on your computer.
-2. Find your computer's local IPv4 address with `ipconfig` in Command Prompt (look for `IPv4 Address`, e.g. `192.168.1.20`).
-3. Connect your phone to the same Wi-Fi.
-4. On your phone, open `http://192.168.1.20:5000/` using your actual computer IP. Allow Python through Windows Firewall if prompted.
-5. QR codes created with the default local configuration still use `localhost`, so for a same-Wi-Fi phone test, stop the server and set the base URL before starting it:
-   ```powershell
-   $env:VERIFY_BASE_URL="http://192.168.1.20:5000"
-   python app.py
-   ```
-   Replace the IP with your computer's actual IPv4 address. Certificates issued after setting this variable will have phone-reachable QR codes.
+### Issuing a certificate
 
-## Make it work from any phone, anywhere
-
-A local `127.0.0.1` address is not public. Deploy this app to a hosting provider that supports Python/Flask and HTTPS, then set environment variables:
-- `SECRET_KEY`: a long random secret string
-- `VERIFY_BASE_URL`: your deployed HTTPS URL, e.g. `https://your-app.onrender.com`
-- `COOKIE_SECURE`: `1` when using HTTPS
-- `DATABASE_PATH`: path on a persistent disk if the hosting provider uses ephemeral filesystems
-
-Build/start command example:
-- Build: `pip install -r requirements.txt`
-- Start: `gunicorn app:app`
-
-Use persistent storage for SQLite or migrate to a managed database before relying on the website for real certificates. QR codes already printed with localhost URLs must be reissued to use the public URL.
-
-## Security notes
-
-This is a college-project starter. Set a strong `SECRET_KEY` before deployment, use HTTPS, use persistent database storage, and add institution-level authorization/administration before production use. Public verification intentionally does not require a login.
-
-
-## Important QR-code note
-Set `VERIFY_BASE_URL` before issuing new certificates. QR codes are created at issue time and keep the URL they were generated with. If you deploy later, reissue certificates or generate new PDFs after setting the public HTTPS URL.
-=======
-# Certificate Management Backend
-
-Flask + SQLite backend that stores and serves certificate records.
-
-## Setup
-
-```bash
-python -m venv venv
-venv\Scripts\activate        # Mac/Linux: source venv/bin/activate
-pip install -r requirements.txt
-python app.py
-```
-
-Server runs at http://127.0.0.1:5000. The database is created automatically.
-
-## API
-
-| Method | URL | Description |
-|---|---|---|
-| GET | `/` | Health check |
-| POST | `/certificates` | Create a certificate |
-| GET | `/certificates` | List all certificates |
-| GET | `/certificates/<certificate_id>` | Get one certificate |
-
-### POST /certificates
-
-Request body (JSON, all fields required):
+`POST /certificates` takes a JSON body with all fields required:
 
 ```json
 {
@@ -95,18 +74,46 @@ Request body (JSON, all fields required):
   "email": "asha@example.com",
   "course_name": "Python Workshop",
   "issued_by": "ABC College",
-  "issue_date": "2026-10-22"
+  "issue_date": "2026-10-29"
 }
 ```
 
-Response (201): `{"certificate_id": "CERT-2026-K2M9X4TB"}`
+Response (201): `{"certificate_id": "CERT-A1B2C3D4E5F6"}`
 
-### GET /certificates/<certificate_id>
+### Public verification data
 
-Returns the record, or 404 `{"error": "Certificate not found"}`
-if the ID does not exist (meaning the certificate is not genuine).
+`GET /certificates/<id>` returns only what a verifier needs: `certificate_id`, `name`, `course_name`, `issued_by`, `issue_date` and `status`. It does not return the student's email or the issuing account. An unknown ID returns 404 `{"error": "Certificate not found"}`, meaning the certificate is not genuine.
 
-## Testing
+## How verification works
 
-With the server running, in a second terminal: `python test_api.py`"# qr-based-certifiacte-verification-system" 
->>>>>>> 21ecc1c83ddf9d9674b32ef06d00a701d297e60c
+1. The institution issues a certificate. The record is saved in SQLite with the issuing account as its owner.
+2. A QR code is generated that links to `/verify/<certificate_id>`.
+3. Anyone who opens that link sees the certificate's details, or a "not found" message if the ID does not exist.
+
+## Project structure
+
+```
+app.py          Flask app: routes, login, QR generation
+database.py     SQLite connection and table creation
+models.py       Certificate queries (add, get, list)
+templates/      HTML pages (index, login, signup, issue, verify)
+static/         verify.css and verify.js for the verification page
+requirements.txt
+```
+
+## Configuration
+
+Optional environment variables:
+
+- `SECRET_KEY`: secret used to sign login sessions. Set a long random value before any real use.
+- `DATABASE_PATH`: custom location for the SQLite file.
+
+## Known limitations
+
+- **QR codes and phones:** a QR code links to the address the site was opened from. A QR created while using `http://127.0.0.1:5000` will not open on a phone, because `127.0.0.1` means the phone itself. Phone scanning needs the site opened through your computer's network address, or a public deployment.
+- The app currently runs with Flask's debug server, which is for development only.
+- SQLite on a hosting provider with a temporary filesystem can lose data. Use persistent storage before relying on it for real certificates.
+
+## Security notes
+
+This is a college project. Before real use, set a strong `SECRET_KEY`, turn off debug mode, serve over HTTPS, use persistent database storage, and add administrator controls for institutions. The public verification page intentionally does not require a login.

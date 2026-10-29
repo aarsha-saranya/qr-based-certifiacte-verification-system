@@ -1,4 +1,4 @@
-<<<<<<< HEAD
+
 
 import os
 import sqlite3
@@ -6,8 +6,11 @@ from functools import wraps
 from io import BytesIO
 
 import qrcode
+import qrcode.image.svg
 from flask import (
     Flask,
+    Response,
+    jsonify,
     render_template,
     request,
     redirect,
@@ -19,10 +22,11 @@ from flask import (
 )
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from database import get_db_connection
-from models import get_all_certificates
+from database import get_db_connection, init_db
+from models import add_certificate, get_certificate, get_all_certificates
 
 app = Flask(__name__)
+init_db()
 app.secret_key = os.environ.get(
     "SECRET_KEY",
     "replace-this-with-a-long-random-secret"
@@ -48,7 +52,16 @@ def get_current_user_id():
         abort(401)
     return int(user_id)
 
-
+@app.context_processor
+def inject_user():
+    if "user_id" in session:
+        return {
+            "user": {
+                "id": session["user_id"],
+                "name": session.get("username"),
+            }
+        }
+    return {"user": None}
 # --------------------------------------------------
 # Home / dashboard
 # --------------------------------------------------
@@ -151,7 +164,7 @@ def login():
 # Logout
 # --------------------------------------------------
 
-@app.route("/logout")
+@app.route("/logout", methods=["GET", "POST"])
 def logout():
     session.clear()
     return redirect(url_for("login"))
@@ -207,7 +220,84 @@ def issue_certificate():
 
     return render_template("issue.html")
 
+# --------------------------------------------------
+# JSON API used by the Issue page
+# (login required; each user only sees their own certificates)
+# --------------------------------------------------
 
+@app.route("/certificates", methods=["GET"])
+@login_required
+def list_certificates():
+    user_id = get_current_user_id()
+    return jsonify(get_all_certificates(owner_user_id=user_id))
+
+
+@app.route("/certificates", methods=["POST"])
+@login_required
+def create_certificate():
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"error": "Request body must be valid JSON"}), 400
+
+    required = ["name", "email", "course_name", "issued_by", "issue_date"]
+    missing = [f for f in required if not str(data.get(f, "")).strip()]
+    if missing:
+        return jsonify({"error": f"Missing fields: {', '.join(missing)}"}), 400
+
+    try:
+        certificate_id = add_certificate(
+            name=str(data["name"]).strip(),
+            email=str(data["email"]).strip().lower(),
+            course_name=str(data["course_name"]).strip(),
+            issued_by=str(data["issued_by"]).strip(),
+            issue_date=str(data["issue_date"]).strip(),
+            owner_user_id=get_current_user_id(),
+        )
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
+    return jsonify({"certificate_id": certificate_id}), 201
+@app.route("/certificates/<certificate_id>/qr.svg")
+@login_required
+def certificate_qr_svg(certificate_id):
+    user_id = get_current_user_id()
+    certificate = get_certificate(certificate_id)
+
+    # Only the account that issued the certificate can load its QR image.
+    if not certificate or certificate["owner_user_id"] != user_id:
+        abort(404)
+
+    verify_url = url_for(
+        "verify_certificate_by_id",
+        certificate_id=certificate_id,
+        _external=True,
+    )
+
+    qr_image = qrcode.make(
+        verify_url,
+        image_factory=qrcode.image.svg.SvgPathImage,
+    )
+    buffer = BytesIO()
+    qr_image.save(buffer)
+
+    return Response(buffer.getvalue(), mimetype="image/svg+xml")
+
+@app.route("/certificates/<certificate_id>", methods=["GET"])
+def certificate_public_json(certificate_id):
+    # Public on purpose: anyone who scans the QR code can verify.
+    # Only return fields a verifier needs (no email, no owner id).
+    certificate = get_certificate(certificate_id)
+    if certificate is None:
+        return jsonify({"error": "Certificate not found"}), 404
+
+    return jsonify({
+        "certificate_id": certificate["certificate_id"],
+        "name": certificate["name"],
+        "course_name": certificate["course_name"],
+        "issued_by": certificate["issued_by"],
+        "issue_date": certificate["issue_date"],
+        "status": certificate["status"],
+    })
 # --------------------------------------------------
 # Public certificate verification
 # Anyone with a valid certificate ID can verify it.
@@ -215,37 +305,19 @@ def issue_certificate():
 
 @app.route("/verify", methods=["GET", "POST"])
 def verify_certificate():
-    certificate = None
-
     if request.method == "POST":
         certificate_id = request.form.get("certificate_id", "").strip()
-        return redirect(
-            url_for("verify_certificate_by_id", certificate_id=certificate_id)
-        )
+        if certificate_id:
+            return redirect(
+                url_for("verify_certificate_by_id", certificate_id=certificate_id)
+            )
 
-    return render_template("verify.html", certificate=certificate)
+    return render_template("verify.html", certificate_id="")
 
 
 @app.route("/verify/<certificate_id>")
 def verify_certificate_by_id(certificate_id):
-    conn = get_db_connection()
-    try:
-        certificate = conn.execute(
-            """
-            SELECT certificate_id, student_name, course_name
-            FROM certificates
-            WHERE certificate_id = ?
-            """,
-            (certificate_id,),
-        ).fetchone()
-    finally:
-        conn.close()
-
-    return render_template(
-        "verify.html",
-        certificate=certificate,
-        searched=True
-    )
+    return render_template("verify.html", certificate_id=certificate_id)
 
 
 # --------------------------------------------------
@@ -298,7 +370,7 @@ def certificate_qr(certificate_id):
 
 if __name__ == "__main__":
     app.run(debug=True)
-=======
+
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from database import init_db
@@ -371,5 +443,5 @@ def server_error(e):
 
 
 if __name__ == "__main__":
-    app.run(debug=True)
->>>>>>> 21ecc1c83ddf9d9674b32ef06d00a701d297e60c
+    app.run(host="0.0.0.0", debug=True)
+
