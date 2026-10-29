@@ -2,59 +2,68 @@
 pipeline {
     agent any
 
+    options {
+        skipDefaultCheckout(true)
+    }
+
     environment {
         PYTHON = 'C:\\Users\\shaik\\AppData\\Local\\Programs\\Python\\Python313\\python.exe'
+        DOCKER_EXE = 'C:\\Program Files\\Docker\\Docker\\resources\\bin\\docker.exe'
         DOCKER_IMAGE = 'qr-certificate-app'
     }
 
     stages {
         stage('Checkout') {
             steps {
-                echo 'Checking out QR Certificate Verification System from GitHub'
+                echo 'Checking out source code from GitHub'
                 checkout scm
             }
         }
 
-        stage('Check Python Installation') {
+        stage('Check Python') {
             steps {
-                echo 'Checking Python installation'
                 bat '"%PYTHON%" --version'
             }
         }
 
         stage('Python Syntax Check') {
             steps {
-                echo 'Checking Python syntax'
                 bat '"%PYTHON%" -m py_compile app.py certificate_pdf.py certificate_routes.py database.py models.py utils.py'
+                echo 'Python syntax check passed'
             }
         }
 
-        stage('Docker Version Check') {
+        stage('Check Docker') {
             steps {
-                echo 'Checking Docker installation'
-                bat 'docker --version'
+                bat '''
+                if not exist "%DOCKER_EXE%" (
+                    echo ERROR: Docker executable was not found.
+                    exit /b 1
+                )
+                "%DOCKER_EXE%" --version
+                "%DOCKER_EXE%" info
+                '''
             }
         }
 
         stage('Build Docker Image') {
             steps {
-                echo 'Building Docker image'
-                bat 'docker build -t %DOCKER_IMAGE%:%BUILD_NUMBER% .'
+                bat '"%DOCKER_EXE%" build -t %DOCKER_IMAGE%:%BUILD_NUMBER% .'
             }
         }
     }
 
     post {
         success {
-            echo 'SUCCESS: Python syntax check and Docker image build completed.'
+            echo 'SUCCESS: Checkout, Python syntax check and Docker image build passed.'
         }
 
         failure {
-            echo 'FAILURE: Check Console Output for the stage that failed.'
+            echo 'BUILD FAILED: Check the first failing stage in Console Output.'
         }
 
         always {
-            echo 'Jenkins pipeline execution finished.'
+            echo 'Pipeline execution completed.'
         }
     }
 }
